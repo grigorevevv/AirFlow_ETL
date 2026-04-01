@@ -9,6 +9,36 @@ from airflow.operators.dummy import DummyOperator
 from airflow.models.baseoperator import chain
 import random
 
+def escalation_callback(context):
+    """
+    Проверяет, какая это попытка падения.
+    Если последняя — эскалирует инцидент.
+    """
+    # Достаем объект TaskInstance
+    #ti = context['ti']
+    # Текущий номер попытки (начинается с 1)
+    current_try = context['ti'].try_number
+    
+    # В Airflow max_tries равен параметру 'retries'. 
+    # Общее число запусков = retries + 1 (первый запуск + перезапуски).
+    # Поэтому порог окончательного падения — это max_tries + 1.
+    #threshold = ti.max_tries + 1
+    
+    # Проверяем, достигли ли мы порога
+    if current_try >= context['ti'].max_tries:
+        logging.critical(
+            f"🔥 CRITICAL: ЭСКАЛАЦИЯ! Задача '{context['ti'].task_id}' "
+            f"окончательно упала после {current_try} попыток.\n"
+            f"Причина: {context.get('exception')}"
+        )
+        # Здесь обычно добавляют код отправки сообщения в Telegram/Slack
+    else:
+        # Если это не последняя попытка, пишем обычный ворнинг
+        logging.warning(
+            f"⚠️ Внимание: Задача '{context['ti'].task_id}' упала (попытка {current_try} из {context['ti'].max_tries}). "
+            f"Ждем следующего ретрая."
+        ) 
+
 # Определение DAG
 default_args = {
     'owner': 'student',
@@ -17,7 +47,8 @@ default_args = {
     'email_on_failure': False,  # Отключаем email уведомления для простоты
     'email_on_retry': False,
     'retries': 3,  # Количество попыток при ошибке
-    'retry_delay': timedelta(seconds=10)  # Задержка между попытками
+    'retry_delay': timedelta(seconds=10),  # Задержка между попытками
+    'on_failure_callback': escalation_callback # Подключаем нашу функцию Для эскалации при окончательном падении
 }
 
 dag = DAG(
@@ -33,7 +64,7 @@ def unreliable_task():
     """Задача, которая может завершиться с ошибкой"""
     # В реальном сценарии это может быть задача, зависящая от внешних факторов
     # Для учебных целей случайным образом генерируем ошибку
-    if random.random() < 0.3:  # 30% вероятность ошибки
+    if random.random() < 0.95:  # 30% вероятность ошибки
         print("Ошибка: задача не выполнена успешно!")
         raise Exception("Случайная ошибка в задаче")
 
@@ -47,7 +78,7 @@ def retry_task():
     time.sleep(2)  # Имитация работы
 
     # С вероятностью 50% задача завершится с ошибкой
-    if random.random() < 0.9:
+    if random.random() < 0.3:
         print("Ошибка в retry_task!")
         raise Exception("Ошибка в задаче с повторными попытками")
 
@@ -64,6 +95,10 @@ def failure_handler():
     print("Одна или несколько задач завершились с ошибкой!")
     print("Проверьте логи для получения дополнительной информации")
     return "Ошибка обработана"
+
+import logging
+
+   
 
 # Определение задач
 start_task = DummyOperator(
@@ -90,6 +125,7 @@ success_handler_task = PythonOperator(
     dag=dag
 )
 
+
 failure_handler_task = PythonOperator(
     task_id='failure_handler',
     python_callable=failure_handler,
@@ -106,4 +142,4 @@ end_task = DummyOperator(
 # Установка зависимостей
 # Используем chain, чтобы наглядно показать ученикам построение ветвящихся зависимостей без ручного перечисления операторов.
 chain(start_task, [unreliable_task, retry_task], [success_handler_task, failure_handler_task], end_task)
-
+#
