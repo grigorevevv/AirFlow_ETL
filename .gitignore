@@ -1,0 +1,12 @@
+.vscode/settings.json
+
+# Do not commit secrets
+.env
+__pycache__/
+*/__pycache__/
+*.pyc
+.venv/
+venv/
+data/*.csv
+data/output/
+data/input/
